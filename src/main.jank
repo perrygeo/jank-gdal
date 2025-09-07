@@ -1,0 +1,29 @@
+(ns main)
+
+(cpp/raw "#include \"gdal_priv.h\"")
+
+(defn c-str
+  "convert jank object into a C char array"
+  [s]
+  (cpp/cast (cpp/type "const char*") s))
+
+(def raster-path "data/slope.tif")
+
+(defn -main [& _args]
+  (cpp/GDALAllRegister)
+
+  (let [fname (c-str raster-path)
+        ds (cpp/GDALOpen fname cpp/GA_ReadOnly)
+        nx (cpp/GDALGetRasterXSize ds)
+        ny (cpp/GDALGetRasterYSize ds)
+        nbands (cpp/GDALGetRasterCount ds)
+        projection (cpp/GDALGetProjectionRef ds)
+        band (cpp/GDALGetRasterBand ds 1)
+        scanline (cpp/CPLMalloc #_(cpp/sizeof float) (* nx 32))
+        _ (cpp/GDALRasterIO band cpp/GF_Read 0 0 nx 1 scanline nx 1 cpp/GDT_Float32 0 0)]
+    (println "Raster\t\t" fname)
+    (println "Size\t\t" nx "x" ny "x" nbands "band(s)")
+    (println "Projection\t" projection)
+
+    ;; TODO how to index into this contiguous block of memory?
+    #_(println scanline)))

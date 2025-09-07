@@ -1,0 +1,37 @@
+(ns
+ ^{:clj-kondo/ignore [:unresolved-namespace]}
+ main)
+
+; not necessary apparently?
+; (cpp/raw "#include <chrono>")
+
+; Jank fn mixed with cpp types, Interop with C++ can happen *seamlessly*.
+
+(defn sleep-for [ms]
+  (let [duration (cpp/std.chrono.milliseconds (cpp/int ms))]
+    (cpp/std.this_thread.sleep_for duration)))
+
+;; ------------------------------------------------------------
+;; Main
+;;
+
+(cpp/raw "#include \"gdal_priv.h\"")
+
+(defn -main [& _args]
+  (sleep-for 36)
+
+  (cpp/GDALAllRegister)  ;; required before calling GDALOpen
+
+  (let [fname (cpp/cast (cpp/type "const char*") "slope.tif")
+        ds (cpp/GDALOpen fname cpp/GA_ReadOnly)
+        x-len (cpp/GDALGetRasterXSize ds)
+        y-len (cpp/GDALGetRasterYSize ds)
+        proj (cpp/GDALGetProjectionRef ds)]
+    (println x-len y-len)
+    (println proj)
+    (println fname))
+  (println "Hola World!"))
+
+(comment
+  (-main)
+  (apply + (distinct [12 8 12 16 8 6])))
