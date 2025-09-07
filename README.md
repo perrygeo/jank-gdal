@@ -5,7 +5,7 @@ A demonstration of Jank, a Clojure dialect that interoperates with C++.
 Goal: a minimal development environment to run a jank application to work with 
 a raster dataset (GeoTIFF) using the [GDAL Raster API](https://gdal.org/en/stable/tutorials/raster_api_tut.html)
 
-`src/main.jank` contains a Clojure/Jank program which opens the raster and prints metadata to stdout.
+[`src/main.jank`](https://github.com/perrygeo/jank-gdal/blob/main/src/main.jank) contains a Clojure/Jank program which opens the raster and prints metadata to stdout.
 
 The short version
 
