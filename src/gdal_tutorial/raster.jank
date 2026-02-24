@@ -1,0 +1,64 @@
+(ns gdal-tutorial.raster
+  (:require [gdal-tutorial.util :refer [c-str]])
+  (:include "gdal.h")
+  (:refer-global :only [GA_ReadOnly
+                        GDALAllRegister
+                        GDALGetDatasetDriver
+                        GDALGetDriverShortName
+                        GDALGetGeoTransform
+                        GDALGetProjectionRef
+                        GDALGetRasterBand
+                        GDALGetRasterCount
+                        GDALGetRasterXSize
+                        GDALGetRasterYSize
+                        GDALOpen
+                        GDALRasterIO
+                        GDT_Float32
+                        GF_Read]))
+
+(def default-raster-path "data/slope.tif")
+
+;; ew mutable globals
+;; necessary to run GetGeoTransform but no way to read it
+(cpp/raw "double gt[6]{0.0, 0.0, 0.0, 0.0, 0.0, 0.0};")
+
+(defn raster-info
+  [path]
+  (let [fname (c-str path)
+        ds (GDALOpen fname GA_ReadOnly)
+        drv (GDALGetDriverShortName (GDALGetDatasetDriver ds))
+        _ (GDALGetGeoTransform ds cpp/gt)
+        nx (GDALGetRasterXSize ds)
+        ny (GDALGetRasterYSize ds)
+        nbands (GDALGetRasterCount ds)
+        projection (GDALGetProjectionRef ds)]
+    {:nbands nbands
+     :height ny
+     :width nx
+     :path fname
+     :driver drv
+     :projection projection}))
+
+;; TODO how do I get the array values
+; (into [] cpp/gt)
+; (println cpp/gt)
+;; NOT IMPLEMENTED
+; (def adf-geo-transform (make-array double 6))
+; (aset-double adf-geo-transform 0 value)
+; (aget adg-geo-transform 0)
+
+(defn -main
+  [& args]
+  (GDALAllRegister)
+  (let [path (or (first args)
+                 (do (println "DEFAULT...") default-raster-path))
+        rinfo (raster-info path)]
+    (println rinfo)))
+
+(comment
+  ;; CAREFUL, if called before GDALAllRegister
+  ; {:bands 0, :height 0, :width 0, :path "data/slope.tif", :projection nil}
+  (raster-info default-raster-path)
+
+  ;; this will print to repl stdout
+  (-main default-raster-path))

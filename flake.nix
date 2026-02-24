@@ -3,7 +3,8 @@
   description = "C++ development environment with GDAL";
 
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    # Pin to same nixpkgs commit as jank to ensure GLIBC compatibility
+    nixpkgs.url = "github:NixOS/nixpkgs/b579d443b37c9c5373044201ea77604e37e748c8";
     flake-utils.url = "github:numtide/flake-utils";
   };
 
@@ -24,6 +25,7 @@
             gdal
 
             # Additional useful tools
+            leiningen
             gdb
             valgrind
             git

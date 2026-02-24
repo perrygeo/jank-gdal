@@ -1,0 +1,6 @@
+(ns gdal-tutorial.util)
+
+(defn c-str
+  "convert jank object into a C char array"
+  [s]
+  (cpp/cast (cpp/type "const char*") s))
