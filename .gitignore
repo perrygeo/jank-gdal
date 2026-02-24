@@ -4,4 +4,4 @@
 .nrepl-port
 flake.lock
 target/
-data/B02.tif
+data/B*.tif
