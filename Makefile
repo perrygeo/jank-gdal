@@ -1,12 +1,21 @@
 _default:
 	@echo "Usage: make clean|check|compile|repl|run"
 
-run:
+run: raster vector
+
+raster:
 	/usr/local/bin/jank \
 		$(shell gdal-config --libs) \
 		$(shell gdal-config --cflags) \
 		--module-path src \
 		run-main gdal-tutorial.raster
+
+vector:
+	/usr/local/bin/jank \
+		$(shell gdal-config --libs) \
+		$(shell gdal-config --cflags) \
+		--module-path src \
+		run-main gdal-tutorial.vector
  
 clean:
 	rm -rf ./target

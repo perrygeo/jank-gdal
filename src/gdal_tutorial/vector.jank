@@ -1,0 +1,60 @@
+(ns gdal-tutorial.vector
+  (:require [gdal-tutorial.util :refer [c-str]])
+  (:include "gdal.h")
+  (:refer-global :only [GDALAllRegister
+                        GDALDatasetGetLayer
+                        GDALDatasetGetLayerCount
+                        GDALDatasetH
+                        GDALOpenEx
+                        GDAL_OF_VECTOR
+                        OGRFeatureDefnH
+                        OGR_GetFieldTypeName
+                        OGR_FD_GetFieldCount
+                        OGR_FD_GetFieldDefn
+                        OGR_FD_GetFieldDefn
+                        OGR_Fld_GetNameRef
+                        OGR_Fld_GetType
+                        OGR_L_GetLayerDefn]))
+
+(def default-vector-path "data/test.geojson")
+
+(defn get-field-info [box-lyrdef i]
+  (let [lyrdef (cpp/unbox OGRFeatureDefnH box-lyrdef)
+        field-def (OGR_FD_GetFieldDefn lyrdef i)
+        field-name (OGR_Fld_GetNameRef field-def)
+        field-type (OGR_Fld_GetType field-def)
+        field-type-name (OGR_GetFieldTypeName field-type)]
+    {:name field-name :type field-type-name}))
+
+(defn get-layer-info [box-ds i]
+  (let [ds (cpp/unbox GDALDatasetH box-ds)
+        lyr (GDALDatasetGetLayer ds i)
+        lyrdef (OGR_L_GetLayerDefn lyr)
+        nfields (OGR_FD_GetFieldCount lyrdef)
+        lyrdefbox (cpp/box lyrdef)
+        fields (mapv #(get-field-info lyrdefbox %) (range nfields))]
+    {:nfields nfields :fields fields}))
+
+(defn vector-info
+  [path]
+  (let [fname (c-str path)
+        ds (GDALOpenEx fname GDAL_OF_VECTOR cpp/nullptr cpp/nullptr cpp/nullptr)
+        n (GDALDatasetGetLayerCount ds)
+        box-ds (cpp/box ds)
+        layers (mapv #(get-layer-info box-ds %) (range n))]
+    {:nlayers n
+     :layers layers}))
+
+(defn -main
+  [& args]
+  (GDALAllRegister)
+  (let [path (or (first args) default-vector-path)
+        rinfo (vector-info path)]
+    (prn rinfo)))
+
+(comment
+  (GDALAllRegister)
+  ;; undefined behavior if called before GDALAllRegister
+  (vector-info default-vector-path)
+  ;; this will print to repl stdout
+  (-main default-vector-path))

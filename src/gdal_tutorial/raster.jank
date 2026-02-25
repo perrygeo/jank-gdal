@@ -18,16 +18,16 @@
 
 (def default-raster-path "data/slope.tif")
 
-;; ew mutable globals
-;; necessary to run GetGeoTransform but no way to read it
-(cpp/raw "double gt[6]{0.0, 0.0, 0.0, 0.0, 0.0, 0.0};")
+;; mutable globals
+;; ?necessary to run GetGeoTransform but no way to read it
+; (cpp/raw "double gt[6]{0.0, 0.0, 0.0, 0.0, 0.0, 0.0};")
 
 (defn raster-info
   [path]
   (let [fname (c-str path)
         ds (GDALOpen fname GA_ReadOnly)
         drv (GDALGetDriverShortName (GDALGetDatasetDriver ds))
-        _ (GDALGetGeoTransform ds cpp/gt)
+        ; _ (GDALGetGeoTransform ds cpp/gt)
         nx (GDALGetRasterXSize ds)
         ny (GDALGetRasterYSize ds)
         nbands (GDALGetRasterCount ds)
@@ -50,10 +50,9 @@
 (defn -main
   [& args]
   (GDALAllRegister)
-  (let [path (or (first args)
-                 (do (println "DEFAULT...") default-raster-path))
+  (let [path (or (first args) default-raster-path)
         rinfo (raster-info path)]
-    (println rinfo)))
+    (prn rinfo)))
 
 (comment
   ;; CAREFUL, if called before GDALAllRegister
