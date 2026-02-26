@@ -1,17 +1,19 @@
+JANK = $(shell which jank)
+
 _default:
 	@echo "Usage: make clean|check|compile|repl|run"
 
 run: raster vector
 
 raster:
-	/usr/local/bin/jank \
+	$(JANK) \
 		$(shell gdal-config --libs) \
 		$(shell gdal-config --cflags) \
 		--module-path src \
 		run-main gdal-tutorial.raster
 
 vector:
-	/usr/local/bin/jank \
+	$(JANK) \
 		$(shell gdal-config --libs) \
 		$(shell gdal-config --cflags) \
 		--module-path src \
@@ -22,19 +24,19 @@ clean:
 	rm -rf /home/mperry/.cache/jank/*
 
 check:
-	/usr/local/bin/jank check-health \
+	$(JANK) check-health \
 		$(shell gdal-config --libs) \
 		$(shell gdal-config --cflags)
 
 compile: clean
-	/usr/local/bin/jank \
+	$(JANK) \
 		$(shell gdal-config --libs) \
 		$(shell gdal-config --cflags) \
 		--module-path src \
 		compile gdal-tutorial.raster -o ./target/test
 
 repl:
-	/usr/local/bin/jank \
+	$(JANK) \
 		$(shell gdal-config --libs) \
 		$(shell gdal-config --cflags) \
 		--module-path src \
