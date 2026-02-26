@@ -1,14 +1,20 @@
 (ns gdal-tutorial.raster
-  (:require [gdal-tutorial.util :refer [c-str]])
+  (:require [gdal-tutorial.util :refer [pprint]])
   (:include "gdal.h")
   (:refer-global :only [GA_ReadOnly
                         GDALAllRegister
+                        GDALDatasetH
+                        GDALGetBlockSize
+                        GDALGetDataTypeName
                         GDALGetDatasetDriver
                         GDALGetDriverShortName
                         GDALGetGeoTransform
                         GDALGetProjectionRef
                         GDALGetRasterBand
                         GDALGetRasterCount
+                        GDALGetRasterDataType
+                        GDALGetRasterMaximum
+                        GDALGetRasterMinimum
                         GDALGetRasterXSize
                         GDALGetRasterYSize
                         GDALOpen
@@ -21,23 +27,63 @@
 ;; mutable globals
 ;; ?necessary to run GetGeoTransform but no way to read it
 ; (cpp/raw "double gt[6]{0.0, 0.0, 0.0, 0.0, 0.0, 0.0};")
+; (cpp/raw "double mm[2]{};")
+
+(defn get-band-info [box-ds i]
+  ; TODO
+  ; color interp
+  ; nodata
+  ; ovr
+  ; better min/max handling
+  ;  adfMinMax[0] = GDALGetRasterMinimum( hBand, &bGotMin );
+  ;  adfMinMax[1] = GDALGetRasterMaximum( hBand, &bGotMax );
+  ;  if( ! (bGotMin && bGotMax) )
+  ;     GDALComputeRasterMinMax( hBand, TRUE, adfMinMax );
+  (let [ds (cpp/unbox GDALDatasetH box-ds)
+        band (GDALGetRasterBand ds i)
+        dtype (GDALGetDataTypeName (GDALGetRasterDataType band))
+        block-xsize (cpp/int 0)
+        block-ysize (cpp/int 0)
+        _ (GDALGetBlockSize band (cpp/& block-xsize) (cpp/& block-ysize))
+        ;; NOTE: bands actual min/max can be expensive
+        ;; TODO (cpp/GDALComputeRasterMinMax band #cpp true cpp/mm)
+        ;; mm? just to satisfy types. 
+        ;; TODO arrays, for now we have to re-request
+        got-min? (cpp/int 0)
+        got-max? (cpp/int 0)
+        bmin (GDALGetRasterMinimum band (cpp/& got-min?))
+        bmax (GDALGetRasterMaximum band (cpp/& got-max?))]
+
+    {:block-xsize block-xsize
+     :dtype dtype
+     :min (when (> got-min? 0) bmin)
+     :max (when (> got-max? 0) bmax)
+     :block-ysize block-ysize}))
 
 (defn raster-info
   [path]
-  (let [fname (c-str path)
-        ds (GDALOpen fname GA_ReadOnly)
+  (let [ds (GDALOpen path GA_ReadOnly)
         drv (GDALGetDriverShortName (GDALGetDatasetDriver ds))
         ; _ (GDALGetGeoTransform ds cpp/gt)
         nx (GDALGetRasterXSize ds)
         ny (GDALGetRasterYSize ds)
         nbands (GDALGetRasterCount ds)
-        projection (GDALGetProjectionRef ds)]
+        projection (GDALGetProjectionRef ds)
+        box-ds (cpp/box ds)
+        ;; bands are 1-indexed
+        bands (mapv #(get-band-info box-ds (+ 1 %)) (range nbands))]
     {:nbands nbands
+     :bands bands
      :height ny
      :width nx
-     :path fname
+     :path path
      :driver drv
-     :projection projection}))
+     :srs projection
+     :gt nil
+     ;; below depends on the geotransform
+     :extent nil
+     :pixelsize [nil nil]
+     :origin [nil nil]}))
 
 ;; TODO how do I get the array values
 ; (into [] cpp/gt)
@@ -47,17 +93,36 @@
 ; (aset-double adf-geo-transform 0 value)
 ; (aget adg-geo-transform 0)
 
+; float *pafScanline;
+; int   nXSize = GDALGetRasterBandXSize( hBand );
+; pafScanline = (float *) CPLMalloc(sizeof(float)*nXSize);
+; GDALRasterIO( hBand, GF_Read, 0, 0, nXSize, 1,
+;             pafScanline, nXSize, 1, GDT_Float32,
+;             0, 0 );
+
 (defn -main
   [& args]
   (GDALAllRegister)
   (let [path (or (first args) default-raster-path)
         rinfo (raster-info path)]
-    (prn rinfo)))
+    (pprint rinfo)))
+
+(defn cache-used-pct []
+  (* 100.0 (/
+            (cpp/GDALGetCacheUsed64)
+            (cpp/GDALGetCacheMax64))))
 
 (comment
   ;; CAREFUL, if called before GDALAllRegister
   ; {:bands 0, :height 0, :width 0, :path "data/slope.tif", :projection nil}
   (raster-info default-raster-path)
+  (raster-info "data/B02.tif")
+
+  (cpp/GDALSetCacheMax64 1660000000) ;; bytes
+  (cache-used-pct)
+
+  ;; TODO
+  ;; void GDALGetOpenDatasets(GDALDatasetH **hDS, int *pnCount)
 
   ;; this will print to repl stdout
   (-main default-raster-path))

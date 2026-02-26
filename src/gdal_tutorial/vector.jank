@@ -1,20 +1,28 @@
 (ns gdal-tutorial.vector
-  (:require [gdal-tutorial.util :refer [c-str]])
+  (:require [gdal-tutorial.util :refer [c-str pprint]])
   (:include "gdal.h")
   (:refer-global :only [GDALAllRegister
                         GDALDatasetGetLayer
                         GDALDatasetGetLayerCount
                         GDALDatasetH
+                        GDALGetProjectionRef
                         GDALOpenEx
                         GDAL_OF_VECTOR
+                        OGRERR_NONE
+                        OGREnvelope
                         OGRFeatureDefnH
-                        OGR_GetFieldTypeName
+                        OGRGeometryTypeToName
                         OGR_FD_GetFieldCount
                         OGR_FD_GetFieldDefn
                         OGR_FD_GetFieldDefn
                         OGR_Fld_GetNameRef
                         OGR_Fld_GetType
-                        OGR_L_GetLayerDefn]))
+                        OGR_GetFieldTypeName
+                        OGR_L_GetExtent
+                        OGR_L_GetFeatureCount
+                        OGR_L_GetGeomType
+                        OGR_L_GetLayerDefn
+                        OGR_L_GetName]))
 
 (def default-vector-path "data/test.geojson")
 
@@ -26,35 +34,57 @@
         field-type-name (OGR_GetFieldTypeName field-type)]
     {:name field-name :type field-type-name}))
 
+(comment
+  (vector-info "https://github.com/OSGeo/gdal/raw/refs/heads/master/autotest/ogr/data/parquet/example.parquet")
+  (vector-info default-vector-path))
+
 (defn get-layer-info [box-ds i]
   (let [ds (cpp/unbox GDALDatasetH box-ds)
-        lyr (GDALDatasetGetLayer ds i)
-        lyrdef (OGR_L_GetLayerDefn lyr)
-        nfields (OGR_FD_GetFieldCount lyrdef)
-        lyrdefbox (cpp/box lyrdef)
-        fields (mapv #(get-field-info lyrdefbox %) (range nfields))]
-    {:nfields nfields :fields fields}))
+        srs (GDALGetProjectionRef ds)
+        layer (GDALDatasetGetLayer ds i)
+        name (OGR_L_GetName layer)
+        layer-def (OGR_L_GetLayerDefn layer)
+        nfields (OGR_FD_GetFieldCount layer-def)
+        geom-type-name (OGRGeometryTypeToName (OGR_L_GetGeomType layer))
+        n-features (OGR_L_GetFeatureCount layer 1)
+        envelope (cpp/new OGREnvelope)
+        extent (when (= (OGR_L_GetExtent layer envelope 1) OGRERR_NONE)
+                 {:min-x (.-MinX envelope)
+                  :max-x (.-MaxX envelope)
+                  :min-y (.-MinY envelope)
+                  :max-y (.-MaxY envelope)})
+        box-lyrdef (cpp/box layer-def)
+        fields (mapv #(get-field-info box-lyrdef %) (range nfields))]
+    {:fields fields
+     :geom-type geom-type-name
+     :extent extent
+     :srs srs
+     :n-features n-features
+     :layer-name name}))
 
 (defn vector-info
   [path]
-  (let [fname (c-str path)
-        ds (GDALOpenEx fname GDAL_OF_VECTOR cpp/nullptr cpp/nullptr cpp/nullptr)
+  ;; https://gdal.org/en/stable/api/raster_c_api.html#_CPPv410GDALOpenExPKcjPPCKcPPCKcPPCKc
+  ;; TODO how to construct a  NULL terminated list of strings with the driver short names
+  ;; make-array doesn't work (cpp/make-array (cpp/type "const char*") [(c-str "PARQUET") cpp/nullptr])
+  (let [ds (GDALOpenEx path GDAL_OF_VECTOR cpp/nullptr cpp/nullptr cpp/nullptr)
         n (GDALDatasetGetLayerCount ds)
         box-ds (cpp/box ds)
         layers (mapv #(get-layer-info box-ds %) (range n))]
-    {:nlayers n
-     :layers layers}))
+    {:layers layers
+     :path path}))
 
 (defn -main
   [& args]
   (GDALAllRegister)
   (let [path (or (first args) default-vector-path)
-        rinfo (vector-info path)]
-    (prn rinfo)))
+        vinfo (vector-info path)]
+    (pprint vinfo)))
 
 (comment
-  (GDALAllRegister)
   ;; undefined behavior if called before GDALAllRegister
   (vector-info default-vector-path)
-  ;; this will print to repl stdout
+  (vector-info "https://github.com/OSGeo/gdal/raw/refs/heads/master/autotest/ogr/data/parquet/example.parquet")
+
+;; this will print to repl stdout
   (-main default-vector-path))
