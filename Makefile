@@ -19,6 +19,7 @@ vector:
  
 clean:
 	rm -rf ./target
+	rm -rf /home/mperry/.cache/jank/*
 
 check:
 	/usr/local/bin/jank check-health \
