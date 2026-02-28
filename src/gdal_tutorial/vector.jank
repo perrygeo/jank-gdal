@@ -153,16 +153,17 @@
 (comment
   (GDALAllRegister)
 
+  ;; TODO abstract
   (let [ds (GDALOpenEx default-vector-path GDAL_OF_VECTOR cpp/nullptr cpp/nullptr cpp/nullptr)
         layer (GDALDatasetGetLayer ds 0)
+        _ (OGR_L_ResetReading layer)
         Blayer (cpp/box layer)]
-    (OGR_L_ResetReading layer)
     (take 3 (layer->features Blayer)))
 
-  (let [ds (GDALOpenEx  "https://github.com/OSGeo/gdal/raw/refs/heads/master/autotest/ogr/data/parquet/example.parquet" GDAL_OF_VECTOR cpp/nullptr cpp/nullptr cpp/nullptr)
+  (let [ds (GDALOpenEx "https://github.com/OSGeo/gdal/raw/refs/heads/master/autotest/ogr/data/parquet/example.parquet" GDAL_OF_VECTOR cpp/nullptr cpp/nullptr cpp/nullptr)
         layer (GDALDatasetGetLayer ds 0)
+        _ (OGR_L_ResetReading layer)
         Blayer (cpp/box layer)]
-    (OGR_L_ResetReading layer)
     (take 10 (layer->features Blayer)))
 
   (vector-info default-vector-path)
