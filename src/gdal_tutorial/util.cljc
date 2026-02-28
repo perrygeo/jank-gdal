@@ -26,3 +26,13 @@
          (println (str spaces "]")))
 
        :else (println (str spaces (pr-str m)))))))
+
+(defn fib-seq
+  "Generates an infinite lazy sequence of Fibonacci numbers."
+  ([]
+   (fib-seq 0 1))
+  ([a b]
+   (lazy-seq
+    (cons a (fib-seq b (+ a b))))))
+
+(take 10 (fib-seq))

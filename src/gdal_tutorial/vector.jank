@@ -1,5 +1,5 @@
 (ns gdal-tutorial.vector
-  (:require [gdal-tutorial.util :refer [c-str pprint]])
+  (:require [gdal-tutorial.util :refer [pprint]])
   (:include "gdal.h")
   (:refer-global :only [GDALAllRegister
                         GDALDatasetGetLayer
@@ -11,18 +11,37 @@
                         OGRERR_NONE
                         OGREnvelope
                         OGRFeatureDefnH
+                        OGRFeatureH
                         OGRGeometryTypeToName
+                        OGRLayerH
+                        OGRGeometryH
                         OGR_FD_GetFieldCount
                         OGR_FD_GetFieldDefn
                         OGR_FD_GetFieldDefn
                         OGR_Fld_GetNameRef
                         OGR_Fld_GetType
+                        OGR_F_Destroy
+                        OGR_F_GetFieldAsDouble
+                        OGR_F_GetFieldAsInteger
+                        OGR_F_GetFieldAsInteger64
+                        OGR_F_GetFieldAsString
+                        OGR_F_GetGeometryRef
+                        OGR_F_IsFieldNull
+                        OGR_F_IsFieldSet
                         OGR_GetFieldTypeName
+                        OGR_G_ExportToJson
+                        OGR_G_GetGeometryType
+                        OGR_G_GetX
+                        OGR_G_GetY
                         OGR_L_GetExtent
                         OGR_L_GetFeatureCount
                         OGR_L_GetGeomType
                         OGR_L_GetLayerDefn
-                        OGR_L_GetName]))
+                        OGR_L_GetName
+                        OGR_L_GetNextFeature
+                        OGR_L_ResetReading
+                        wkbPoint
+                        #_wkbFlatten]))
 
 (def default-vector-path "data/test.geojson")
 
@@ -43,18 +62,18 @@
         srs (GDALGetProjectionRef ds)
         layer (GDALDatasetGetLayer ds i)
         name (OGR_L_GetName layer)
-        layer-def (OGR_L_GetLayerDefn layer)
-        nfields (OGR_FD_GetFieldCount layer-def)
+        layerdef (OGR_L_GetLayerDefn layer)
+        nfields (OGR_FD_GetFieldCount layerdef)
         geom-type-name (OGRGeometryTypeToName (OGR_L_GetGeomType layer))
-        n-features (OGR_L_GetFeatureCount layer 1)
+        n-features (OGR_L_GetFeatureCount layer i)
         envelope (cpp/new OGREnvelope)
         extent (when (= (OGR_L_GetExtent layer envelope 1) OGRERR_NONE)
                  {:min-x (.-MinX envelope)
                   :max-x (.-MaxX envelope)
                   :min-y (.-MinY envelope)
                   :max-y (.-MaxY envelope)})
-        box-lyrdef (cpp/box layer-def)
-        fields (mapv #(get-field-info box-lyrdef %) (range nfields))]
+        box-layerdef (cpp/box layerdef)
+        fields (mapv #(get-field-info box-layerdef %) (range nfields))]
     {:fields fields
      :geom-type geom-type-name
      :extent extent
@@ -65,7 +84,7 @@
 (defn vector-info
   [path]
   ;; https://gdal.org/en/stable/api/raster_c_api.html#_CPPv410GDALOpenExPKcjPPCKcPPCKcPPCKc
-  ;; TODO how to construct a  NULL terminated list of strings with the driver short names
+  ;; how to construct a  NULL terminated list of strings with the driver short names
   ;; make-array doesn't work (cpp/make-array (cpp/type "const char*") [(c-str "PARQUET") cpp/nullptr])
   (let [ds (GDALOpenEx path GDAL_OF_VECTOR cpp/nullptr cpp/nullptr cpp/nullptr)
         n (GDALDatasetGetLayerCount ds)
@@ -73,6 +92,56 @@
         layers (mapv #(get-layer-info box-ds %) (range n))]
     {:layers layers
      :path path}))
+
+;; Helper functions for lazy feature sequence
+
+(defn process-feature
+  "Process a single OGR feature and return a simple string representation"
+  [box-feature box-layerdef]
+  (let [feature (cpp/unbox OGRFeatureH box-feature)
+        layerdef (cpp/unbox OGRFeatureDefnH box-layerdef)
+        nfields (OGR_FD_GetFieldCount layerdef)
+        fields (reduce
+                (fn [result i]
+                  (let [layerdef (cpp/unbox OGRFeatureDefnH box-layerdef)
+                        feature (cpp/unbox OGRFeatureH box-feature)
+                        field-def (OGR_FD_GetFieldDefn layerdef i)
+                        field-name (OGR_Fld_GetNameRef field-def)
+                        field-value (cond
+                                      (zero? (OGR_F_IsFieldSet feature i)) nil
+                                      (pos? (OGR_F_IsFieldNull feature i)) nil
+                                      :else (OGR_F_GetFieldAsString feature i))]
+                    (assoc result (keyword field-name) field-value)))
+                {}
+                (range nfields))
+        ;; Get geometry JSON (OGR_F_GetGeometryRef returns nullptr for null geometry)
+        geom (OGR_F_GetGeometryRef feature)
+        ;; Always try to export - GDAL will handle null geometry
+        geom-json (OGR_G_ExportToJson geom)]
+    {:properties fields
+     :geometry geom-json}))
+
+(defn layer->features
+  "Returns a lazy sequence of features with fields and geometry from a layer.
+   Must call OGR_L_ResetReading on the layer before calling this function."
+  [box-layer]
+  (let [layer (cpp/unbox OGRLayerH box-layer)
+        force-count 1
+        n-features (OGR_L_GetFeatureCount layer force-count)
+        layerdef (OGR_L_GetLayerDefn layer)
+        box-layerdef (cpp/box layerdef)]
+    ((fn step [i]
+       (when (< i n-features)
+         (let [layer (cpp/unbox OGRLayerH box-layer)
+               feature (OGR_L_GetNextFeature layer)
+               box-feature (cpp/box feature)
+               result (process-feature box-feature box-layerdef)]
+           ;; Destroy feature to free memory; yes, jank will clean it up later
+           ;; but we don't need it anymore so do it inline
+           (OGR_F_Destroy feature)
+           ;; Return cons cell with result and lazy tail
+           (lazy-seq (cons result (step (inc i)))))))
+     0)))
 
 (defn -main
   [& args]
@@ -82,9 +151,21 @@
     (pprint vinfo)))
 
 (comment
-  ;; undefined behavior if called before GDALAllRegister
+  (GDALAllRegister)
+
+  (let [ds (GDALOpenEx default-vector-path GDAL_OF_VECTOR cpp/nullptr cpp/nullptr cpp/nullptr)
+        layer (GDALDatasetGetLayer ds 0)
+        Blayer (cpp/box layer)]
+    (OGR_L_ResetReading layer)
+    (take 3 (layer->features Blayer)))
+
+  (let [ds (GDALOpenEx  "https://github.com/OSGeo/gdal/raw/refs/heads/master/autotest/ogr/data/parquet/example.parquet" GDAL_OF_VECTOR cpp/nullptr cpp/nullptr cpp/nullptr)
+        layer (GDALDatasetGetLayer ds 0)
+        Blayer (cpp/box layer)]
+    (OGR_L_ResetReading layer)
+    (take 10 (layer->features Blayer)))
+
   (vector-info default-vector-path)
   (vector-info "https://github.com/OSGeo/gdal/raw/refs/heads/master/autotest/ogr/data/parquet/example.parquet")
 
-;; this will print to repl stdout
   (-main default-vector-path))
