@@ -5,3 +5,5 @@
 flake.lock
 target/
 data/B*.tif
+data/ne*
+TODO.md
