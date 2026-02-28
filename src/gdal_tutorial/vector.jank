@@ -30,9 +30,13 @@
                         OGR_F_IsFieldSet
                         OGR_GetFieldTypeName
                         OGR_G_ExportToJson
+                        OGR_G_GetGeometryCount
+                        OGR_G_GetGeometryRef
                         OGR_G_GetGeometryType
+                        OGR_G_GetPointCount
                         OGR_G_GetX
                         OGR_G_GetY
+                        OGR_GT_Flatten
                         OGR_L_GetExtent
                         OGR_L_GetFeatureCount
                         OGR_L_GetGeomType
@@ -40,8 +44,13 @@
                         OGR_L_GetName
                         OGR_L_GetNextFeature
                         OGR_L_ResetReading
+                        wkbGeometryCollection
+                        wkbLineString
+                        wkbMultiLineString
+                        wkbMultiPoint
+                        wkbMultiPolygon
                         wkbPoint
-                        #_wkbFlatten]))
+                        wkbPolygon]))
 
 (def default-vector-path "data/test.geojson")
 
@@ -52,10 +61,6 @@
         field-type (OGR_Fld_GetType field-def)
         field-type-name (OGR_GetFieldTypeName field-type)]
     {:name field-name :type field-type-name}))
-
-(comment
-  (vector-info "https://github.com/OSGeo/gdal/raw/refs/heads/master/autotest/ogr/data/parquet/example.parquet")
-  (vector-info default-vector-path))
 
 (defn get-layer-info [box-ds i]
   (let [ds (cpp/unbox GDALDatasetH box-ds)
@@ -95,6 +100,173 @@
 
 ;; Helper functions for lazy feature sequence
 
+(defn get-coordinate
+  "Extract a single coordinate pair [x y] from a geometry at the given point index"
+  [box-geom i]
+  (let [geom (cpp/unbox OGRGeometryH box-geom)]
+    [(OGR_G_GetX geom i)
+     (OGR_G_GetY geom i)]))
+
+(defn get-coordinates
+  "Extract all coordinates from a LineString or LinearRing geometry"
+  [box-geom]
+  (let [geom (cpp/unbox OGRGeometryH box-geom)
+        n-points (OGR_G_GetPointCount geom)]
+    (reduce
+     (fn [result i]
+       (let [coord (get-coordinate box-geom i)]
+         (conj result coord)))
+     []
+     (range n-points))))
+
+(defn get-ring
+  "Extract a ring (LineString) from a Polygon geometry at the given index"
+  [box-geom i]
+  (let [geom (cpp/unbox OGRGeometryH box-geom)
+        ring (OGR_G_GetGeometryRef geom i)
+        n-points (OGR_G_GetPointCount ring)]
+    (reduce
+     (fn [result j]
+       (let [geom (cpp/unbox OGRGeometryH box-geom)
+             ring (OGR_G_GetGeometryRef geom i)
+             x (OGR_G_GetX ring j)
+             y (OGR_G_GetY ring j)]
+         (conj result [x y])))
+     []
+     (range n-points))))
+
+(defn get-point-from-multi
+  "Extract a point coordinate from a MultiPoint geometry at the given index"
+  [box-geom i]
+  (let [geom (cpp/unbox OGRGeometryH box-geom)
+        point (OGR_G_GetGeometryRef geom i)
+        x (OGR_G_GetX point 0)
+        y (OGR_G_GetY point 0)]
+    [x y]))
+
+(defn get-linestring-from-multi
+  "Extract a LineString from a MultiLineString geometry at the given index"
+  [box-geom i]
+  (let [geom (cpp/unbox OGRGeometryH box-geom)
+        line (OGR_G_GetGeometryRef geom i)
+        n-points (OGR_G_GetPointCount line)]
+    (reduce
+     (fn [result j]
+       (let [geom (cpp/unbox OGRGeometryH box-geom)
+             line (OGR_G_GetGeometryRef geom i)
+             x (OGR_G_GetX line j)
+             y (OGR_G_GetY line j)]
+         (conj result [x y])))
+     []
+     (range n-points))))
+
+(defn get-polygon-from-multi
+  "Extract rings from a Polygon in a MultiPolygon at the given index"
+  [box-geom i]
+  (let [geom (cpp/unbox OGRGeometryH box-geom)
+        poly (OGR_G_GetGeometryRef geom i)
+        n-rings (OGR_G_GetGeometryCount poly)]
+    (reduce
+     (fn [result j]
+       (let [geom (cpp/unbox OGRGeometryH box-geom)
+             poly (OGR_G_GetGeometryRef geom i)
+             ring (OGR_G_GetGeometryRef poly j)
+             n-points (OGR_G_GetPointCount ring)
+             ring-coords (reduce
+                          (fn [result2 k]
+                            (let [geom (cpp/unbox OGRGeometryH box-geom)
+                                  poly (OGR_G_GetGeometryRef geom i)
+                                  ring (OGR_G_GetGeometryRef poly j)
+                                  x (OGR_G_GetX ring k)
+                                  y (OGR_G_GetY ring k)]
+                              (conj result2 [x y])))
+                          []
+                          (range n-points))]
+         (conj result ring-coords)))
+     []
+     (range n-rings))))
+
+(defn geom->jank
+  "Convert an OGR geometry to a jank map representation (similar to GeoJSON structure)"
+  [box-geom]
+  (let [geom (cpp/unbox OGRGeometryH box-geom)]
+    (when (cpp/!= cpp/nullptr geom)
+      (let [geom-type (OGR_GT_Flatten (OGR_G_GetGeometryType geom))]
+        (cond
+        ;; Point: single coordinate
+          (= geom-type wkbPoint)
+          {:type "Point"
+           :coordinates (get-coordinate box-geom 0)}
+
+        ;; LineString: array of coordinates
+          (= geom-type wkbLineString)
+          {:type "LineString"
+           :coordinates (get-coordinates box-geom)}
+
+        ;; Polygon: array of rings (first is exterior, rest are holes)
+          (= geom-type wkbPolygon)
+          (let [n-rings (OGR_G_GetGeometryCount geom)]
+            {:type "Polygon"
+             :coordinates (reduce
+                           (fn [result i]
+                             (let [ring (get-ring box-geom i)]
+                               (conj result ring)))
+                           []
+                           (range n-rings))})
+
+        ;; MultiPoint: array of point coordinates
+          (= geom-type wkbMultiPoint)
+          (let [n-points (OGR_G_GetGeometryCount geom)]
+            {:type "MultiPoint"
+             :coordinates (reduce
+                           (fn [result i]
+                             (let [point (get-point-from-multi box-geom i)]
+                               (conj result point)))
+                           []
+                           (range n-points))})
+
+        ;; MultiLineString: array of LineString coordinates
+          (= geom-type wkbMultiLineString)
+          (let [n-lines (OGR_G_GetGeometryCount geom)]
+            {:type "MultiLineString"
+             :coordinates (reduce
+                           (fn [result i]
+                             (let [line (get-linestring-from-multi box-geom i)]
+                               (conj result line)))
+                           []
+                           (range n-lines))})
+
+        ;; MultiPolygon: array of Polygon coordinates
+          (= geom-type wkbMultiPolygon)
+          (let [n-polys (OGR_G_GetGeometryCount geom)]
+            {:type "MultiPolygon"
+             :coordinates (reduce
+                           (fn [result i]
+                             (let [poly (get-polygon-from-multi box-geom i)]
+                               (conj result poly)))
+                           []
+                           (range n-polys))})
+
+        ;; GeometryCollection: array of mixed geometries
+          (= geom-type wkbGeometryCollection)
+          (let [n-geoms (OGR_G_GetGeometryCount geom)
+                geoms (reduce
+                       (fn [result i]
+                         (let [g (cpp/unbox OGRGeometryH box-geom)
+                               sub-geom (OGR_G_GetGeometryRef g i)
+                               box-sub-geom (cpp/box sub-geom)
+                               sub-geom-data (geom->jank box-sub-geom)]
+                           (conj result sub-geom-data)))
+                       []
+                       (range n-geoms))]
+            {:type "GeometryCollection"
+             :geometries geoms})
+
+          ;; Unknown geometry type
+          :else
+          {:type "Unknown"
+           :geom-type geom-type})))))
+
 (defn process-feature
   "Process a single OGR feature and return a simple string representation"
   [box-feature box-layerdef]
@@ -114,19 +286,19 @@
                     (assoc result (keyword field-name) field-value)))
                 {}
                 (range nfields))
-        ;; Get geometry JSON (OGR_F_GetGeometryRef returns nullptr for null geometry)
         geom (OGR_F_GetGeometryRef feature)
-        ;; Always try to export - GDAL will handle null geometry
-        geom-json (OGR_G_ExportToJson geom)]
+        box-geom (cpp/box geom)
+        geometry (geom->jank box-geom)]
     {:properties fields
-     :geometry geom-json}))
+     :geometry geometry}))
+
+(def force-count 1)  ;; count features even if its expensive
 
 (defn layer->features
   "Returns a lazy sequence of features with fields and geometry from a layer.
    Must call OGR_L_ResetReading on the layer before calling this function."
   [box-layer]
   (let [layer (cpp/unbox OGRLayerH box-layer)
-        force-count 1
         n-features (OGR_L_GetFeatureCount layer force-count)
         layerdef (OGR_L_GetLayerDefn layer)
         box-layerdef (cpp/box layerdef)]
@@ -146,25 +318,47 @@
 (defn -main
   [& args]
   (GDALAllRegister)
+  (let [ds (GDALOpenEx default-vector-path GDAL_OF_VECTOR cpp/nullptr cpp/nullptr cpp/nullptr)
+        layer (GDALDatasetGetLayer ds 0)
+        _ (OGR_L_ResetReading layer)
+        Blayer (cpp/box layer)]
+    (take 3 (layer->features Blayer)))
   (let [path (or (first args) default-vector-path)
         vinfo (vector-info path)]
     (pprint vinfo)))
 
+;; TODO
+;; (with-layer)
+;;   (features->layer)
+;;   (layer->features)
+;;   (rasterize)
+;;   (interpolate)
+
+;; on geoms
+;; (reproject)
+;; (buffer) etc
+;; 
+
 (comment
   (GDALAllRegister)
 
-  ;; TODO abstract
+  (vector-info "https://github.com/OSGeo/gdal/raw/refs/heads/master/autotest/ogr/data/parquet/example.parquet")
+  (vector-info default-vector-path)
+
   (let [ds (GDALOpenEx default-vector-path GDAL_OF_VECTOR cpp/nullptr cpp/nullptr cpp/nullptr)
         layer (GDALDatasetGetLayer ds 0)
         _ (OGR_L_ResetReading layer)
         Blayer (cpp/box layer)]
     (take 3 (layer->features Blayer)))
 
-  (let [ds (GDALOpenEx "https://github.com/OSGeo/gdal/raw/refs/heads/master/autotest/ogr/data/parquet/example.parquet" GDAL_OF_VECTOR cpp/nullptr cpp/nullptr cpp/nullptr)
+  (let [ds (GDALOpenEx "data/ne_10m_admin_0_countries.gpkg" GDAL_OF_VECTOR cpp/nullptr cpp/nullptr cpp/nullptr)
+        _ (when (cpp/== cpp/nullptr ds) (throw "ERROR: failed to open dataset")) ;; todo get gdal errs
         layer (GDALDatasetGetLayer ds 0)
         _ (OGR_L_ResetReading layer)
         Blayer (cpp/box layer)]
-    (take 10 (layer->features Blayer)))
+    (->> (layer->features Blayer)
+         (filter #(= "South America" (get-in % [:properties :CONTINENT]))) ;; filter by property
+         count))
 
   (vector-info default-vector-path)
   (vector-info "https://github.com/OSGeo/gdal/raw/refs/heads/master/autotest/ogr/data/parquet/example.parquet")

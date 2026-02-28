@@ -107,10 +107,14 @@
         rinfo (raster-info path)]
     (pprint rinfo)))
 
-(defn cache-used-pct []
-  (* 100.0 (/
-            (cpp/GDALGetCacheUsed64)
-            (cpp/GDALGetCacheMax64))))
+;; TODO
+;; (with-band)
+;;   (band->blocks)
+;;   (blocks->band)
+;;   (band->array) ;; allows precise queries
+;;   (array->band)
+;;   ;; numpy-like array manipulations
+;; (warp)
 
 (comment
   ;; CAREFUL, if called before GDALAllRegister
@@ -118,11 +122,6 @@
   (raster-info default-raster-path)
   (raster-info "data/B02.tif")
 
-  (cpp/GDALSetCacheMax64 1660000000) ;; bytes
-  (cache-used-pct)
-
-  ;; TODO
-  ;; void GDALGetOpenDatasets(GDALDatasetH **hDS, int *pnCount)
-
   ;; this will print to repl stdout
   (-main default-raster-path))
+

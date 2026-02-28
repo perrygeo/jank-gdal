@@ -1,0 +1,15 @@
+(ns gdal-tutorial.internals
+  (:include "gdal.h")
+  (:refer-global :only [GDALGetCacheUsed64
+                        GDALSetCacheMax64
+                        GDALGetCacheMax64]))
+
+(defn cache-used-pct []
+  (* 100.0
+     (/
+      (GDALGetCacheUsed64)
+      (GDALGetCacheMax64))))
+
+(comment
+  (GDALSetCacheMax64 1660000000) ;; bytes
+  (cache-used-pct))
