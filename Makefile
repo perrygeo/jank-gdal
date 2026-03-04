@@ -1,9 +1,7 @@
 JANK = $(shell which jank)
 
 _default:
-	@echo "Usage: make clean|check|compile|repl|run"
-
-run: raster vector
+	@echo "Usage: make raster|vector|clean|check|compile|repl"
 
 raster:
 	$(JANK) \
@@ -42,4 +40,4 @@ repl:
 		--module-path src \
 		repl
 
-.PHONY: clean check compile repl run
+.PHONY: raster vector clean check compile repl

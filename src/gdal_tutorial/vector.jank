@@ -50,7 +50,8 @@
                         wkbMultiPoint
                         wkbMultiPolygon
                         wkbPoint
-                        wkbPolygon]))
+                        wkbPolygon
+                        GDALClose]))
 
 (def default-vector-path "data/test.geojson")
 
@@ -339,6 +340,18 @@
 ;; (buffer) etc
 ;; 
 
+(defmacro with-layer
+  [[binding path] & body]
+  `(let [ds# (cpp/GDALOpenEx ~path cpp/GDAL_OF_VECTOR cpp/nullptr cpp/nullptr cpp/nullptr)
+         ~'_ (when (cpp/== cpp/nullptr ds#) (throw "ERROR: failed to open dataset"))
+         layer# (cpp/GDALDatasetGetLayer ds# 0)
+         ~'_ (cpp/OGR_L_ResetReading layer#)
+         ~binding (cpp/box layer#)]
+     (try
+       ~@body
+       (finally
+         (cpp/GDALClose ds#)))))
+
 (comment
   (GDALAllRegister)
 
@@ -351,13 +364,31 @@
         Blayer (cpp/box layer)]
     (take 3 (layer->features Blayer)))
 
-  (let [ds (GDALOpenEx "data/ne_10m_admin_0_countries.gpkg" GDAL_OF_VECTOR cpp/nullptr cpp/nullptr cpp/nullptr)
+  ;; Group by continent and count
+  (let [ds (GDALOpenEx "data/ne_10m_admin_0_countries.shp" GDAL_OF_VECTOR cpp/nullptr cpp/nullptr cpp/nullptr)
         _ (when (cpp/== cpp/nullptr ds) (throw "ERROR: failed to open dataset")) ;; todo get gdal errs
         layer (GDALDatasetGetLayer ds 0)
         _ (OGR_L_ResetReading layer)
         Blayer (cpp/box layer)]
     (->> (layer->features Blayer)
-         (filter #(= "South America" (get-in % [:properties :CONTINENT]))) ;; filter by property
+         (group-by #(get-in % [:properties :CONTINENT]))
+         (map (fn [[continent features]] [continent (count features)]))
+         (into {})))
+
+  (with-layer [lyr "data/ne_10m_admin_0_countries.shp"]
+    (->> (layer->features lyr)
+         (group-by #(get-in % [:properties :CONTINENT]))
+         (map (fn [[continent features]] [continent (count features)]))
+         (into {})))
+
+;; https://www.naturalearthdata.com/http//www.naturalearthdata.com/download/10m/cultural/ne_10m_admin_0_countries.zip
+  (let [ds (GDALOpenEx "data/ne_10m_admin_0_countries.shp" GDAL_OF_VECTOR cpp/nullptr cpp/nullptr cpp/nullptr)
+        _ (when (cpp/== cpp/nullptr ds) (throw "ERROR: failed to open dataset")) ;; todo get gdal errs
+        layer (GDALDatasetGetLayer ds 0)
+        _ (OGR_L_ResetReading layer)
+        Blayer (cpp/box layer)]
+    (->> (layer->features Blayer)
+         (filter #(= "North America" (get-in % [:properties :CONTINENT]))) ;; filter by property
          count))
 
   (vector-info default-vector-path)
